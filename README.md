@@ -22,7 +22,7 @@ The archive includes contributions from NONMEM's creators (Lewis B. Sheiner, Stu
 | [cognigen.com/nmusers](https://web.archive.org/web/*/cognigen.com/nmusers/*) | 2006–2021 | ~1,300 | Wayback Machine |
 | [phor.com/nonmem](https://web.archive.org/web/*/www.phor.com/nonmem/nm/*) | 1998–2004 | ~140 | Wayback Machine |
 
-After deduplication the combined archive contains **~13,400 unique messages spanning 33 years** from ~2,300 contributors.
+After deduplication, the combined archive contains **~13,400 unique messages spanning 33 years** from ~2,300 contributors.
 
 ## Web App
 
