@@ -6,6 +6,9 @@ A structured, searchable archive of the [NMusers mailing list](https://www.mail-
 
 Inspired by the [R Mailing List Archives](https://r-mailing-lists.thecoatlessprofessor.com/) project.
 
+This repository is part of the nmusers organization.
+Viktor Rognås (@vrognas) maintains it on a voluntary basis for the NONMEM community.
+
 ## About NMusers
 
 The NONMEM Users Network (NMusers) is maintained by ICON Clinical Research LLC and has been active since at least 1993.
