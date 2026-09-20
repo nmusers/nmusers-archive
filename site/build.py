@@ -39,6 +39,7 @@ STATIC_DIR = SITE_DIR / "static"
 DATA_PATH = Path("data/messages_all.parquet")
 OVERRIDES_PATH = Path("data/author_overrides.json")
 MONTH_NAMES = {i: calendar.month_name[i] for i in range(1, 13)}
+SITE_URL = "https://nmusers.vrognas.com"
 
 # Name particles that should stay lowercase (except at start of name)
 _NAME_PARTICLES = {"van", "von", "de", "del", "der", "den", "di", "du", "la", "le", "ter", "het"}
@@ -651,6 +652,14 @@ def msg_url(row: dict) -> str:
     return f"/{row['year']}/{row['month']:02d}/{row['msg_seq']}.html"
 
 
+def canonical_path(url: str) -> str:
+    """Netlify serves /a/b/c.html at /a/b/c, and that is the form Google indexed.
+
+    Both forms return 200, so the sitemap must advertise exactly one of them.
+    """
+    return url[: -len(".html")] if url.endswith(".html") else url
+
+
 def msg_date_short(row: dict) -> str:
     """Format date as 'Mar 15, 2006'."""
     if row["date"] is None:
@@ -1143,6 +1152,96 @@ def build_site(output_dir: Path):
     threads_html = env.get_template("threads.html").render(threads=thread_list)
     (threads_dir / "index.html").write_text(threads_html, encoding="utf-8")
     log.info(f"Generated threads page with {len(thread_list)} threads")
+
+    # --- Sitemap and robots.txt ---
+    # Every generated page gets a lastmod from its own newest message, so the
+    # dates stay meaningful across rebuilds instead of all moving to build time.
+    log.info("Generating sitemap.xml and robots.txt...")
+
+    def day(value) -> str | None:
+        return value.strftime("%Y-%m-%d") if value else None
+
+    def newest(msgs: list[dict]) -> str | None:
+        days = [day(m["date"]) for m in msgs if m["date"]]
+        return max(days) if days else None
+
+    year_newest: dict[int, str] = {}
+    month_newest: dict[tuple[int, int], str] = {}
+    category_newest: dict[str, str] = {}
+    for r in rows:
+        if r["date"] is None:
+            continue
+        d = day(r["date"])
+        category_newest[r["category"]] = max(d, category_newest.get(r["category"], d))
+        if r["year"] is None or r["month"] is None:
+            continue
+        year_newest[r["year"]] = max(d, year_newest.get(r["year"], d))
+        key = (r["year"], r["month"])
+        month_newest[key] = max(d, month_newest.get(key, d))
+
+    site_newest = newest(rows)
+
+    # /search/ is deliberately omitted: it renders no content without JavaScript.
+    sitemap_entries: list[tuple[str, str | None]] = [
+        ("/", site_newest),
+        ("/about/", site_newest),
+        ("/authors/", site_newest),
+        ("/threads/", site_newest),
+    ]
+    # Derive year pages from the dated rows rather than `years`, which the
+    # author-page loop above rebinds to a single author's years.
+    sitemap_entries += [(f"/{year}/", year_newest[year]) for year in sorted(year_newest)]
+    sitemap_entries += [
+        (f"/{year}/{month:02d}/", month_newest.get((year, month)))
+        for year, month in sorted(k for k in month_groups if k[0] is not None and k[1] is not None)
+    ]
+    sitemap_entries += [
+        (f"/category/{cat}/", category_newest.get(cat)) for cat in sorted(categories)
+    ]
+    sitemap_entries += [
+        (f"/authors/{slug}/", newest(msgs)) for slug, msgs in sorted(author_groups.items())
+    ]
+    sitemap_entries += [
+        (meta["url"], meta["last_date_sort"] or None) for meta in thread_meta.values()
+    ]
+    sitemap_entries += [(canonical_path(r["url"]), day(r["date"])) for r in rows]
+
+    # Distinct threads can resolve to the same URL: thread_page_url reuses the
+    # shared mail-archive thread_id, and subjects differing only in internal
+    # whitespace slugify identically (normalize_subject keeps them apart, the
+    # slug does not). Only one page survives on disk, and the thread loop above
+    # writes them in this same order, so last-one-wins here matches the file
+    # that is actually served. Taking the first entry instead would advertise
+    # another thread's date - usually an older one, which suppresses recrawls.
+    collapsed: dict[str, str | None] = {}
+    for path, lastmod in sitemap_entries:
+        collapsed[path] = lastmod
+    collisions = len(sitemap_entries) - len(collapsed)
+    if collisions:
+        log.warning(
+            f"{collisions} page URLs collide; only the last-written page exists "
+            "on disk, so the others are unreachable"
+        )
+    sitemap_entries = list(collapsed.items())
+
+    sitemap_lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for path, lastmod in sitemap_entries:
+        sitemap_lines.append("  <url>")
+        sitemap_lines.append(f"    <loc>{html.escape(SITE_URL + path)}</loc>")
+        if lastmod:
+            sitemap_lines.append(f"    <lastmod>{lastmod}</lastmod>")
+        sitemap_lines.append("  </url>")
+    sitemap_lines.append("</urlset>")
+    (output_dir / "sitemap.xml").write_text("\n".join(sitemap_lines) + "\n", encoding="utf-8")
+
+    (output_dir / "robots.txt").write_text(
+        f"User-agent: *\nAllow: /\n\nSitemap: {SITE_URL}/sitemap.xml\n",
+        encoding="utf-8",
+    )
+    log.info(f"Sitemap: {len(sitemap_entries)} URLs")
 
     # --- Search index data ---
     log.info("Exporting search data...")
